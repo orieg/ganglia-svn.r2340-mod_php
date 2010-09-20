@@ -1,0 +1,33 @@
+#!/bin/sh
+# $Id: bootstrap 2174 2010-01-05 15:20:37Z d_pocock $
+echo "Bootstrapping libmetrics"
+cd libmetrics && ./bootstrap || exit 1
+cd ..
+
+MINOR=`grep 'GANGLIA_MINOR_VERSION=' configure.in | cut -d "=" -f 2`
+if [ $MINOR -eq 1 ]; then
+  #XXX: only for 3.1
+  SVNVERSION=`svnversion . | cut -d ":" -f 1 | sed -e "s/[A-Z]//g"`
+  if [ "$SVNVERSION" = "exported" ]; then
+    SVNVERSION=0
+  fi
+  perl -pi -e "s/GANGLIA_NANO_VERSION=\d+/GANGLIA_NANO_VERSION=$SVNVERSION/g" configure.in
+fi
+
+echo "Create distribution timestamp"
+touch Makefile.am
+echo "Running aclocal" &&
+aclocal &&
+echo "Running autoheader" &&
+autoheader &&
+echo "Creating build" &&
+mkdir -p build &&
+echo "Running automake" &&
+automake --add-missing --copy 2>/dev/null
+echo "Running libtoolize" &&
+libtoolize --automake --copy && automake --add-missing --copy &&
+echo "Running autoconf" &&
+autoconf || exit 1
+
+echo &&
+echo "To begin installation, run \"./configure\" now"

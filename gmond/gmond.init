@@ -1,0 +1,50 @@
+#!/bin/sh
+# $Id: gmond.init 1923 2008-11-25 08:48:57Z carenas $
+#
+# chkconfig: 2345 70 40
+# description: gmond startup script
+#
+GMOND=/usr/sbin/gmond
+
+# TMPDIR set to SysV IPC ramdrive to avoid include processing failures
+TMPDIR=/dev/shm
+export TMPDIR
+
+. /etc/rc.d/init.d/functions
+
+RETVAL=0
+
+case "$1" in
+   start)
+      echo -n "Starting GANGLIA gmond: "
+      [ -f $GMOND ] || exit 1
+
+      daemon $GMOND
+      RETVAL=$?
+      echo
+      [ $RETVAL -eq 0 ] && touch /var/lock/subsys/gmond
+	;;
+
+  stop)
+      echo -n "Shutting down GANGLIA gmond: "
+      killproc gmond
+      RETVAL=$?
+      echo
+      [ $RETVAL -eq 0 ] && rm -f /var/lock/subsys/gmond
+	;;
+
+  restart|reload)
+   	$0 stop
+   	$0 start
+   	RETVAL=$?
+	;;
+  status)
+   	status gmond
+   	RETVAL=$?
+	;;
+  *)
+	echo "Usage: $0 {start|stop|restart|status}"
+	exit 1
+esac
+
+exit $RETVAL

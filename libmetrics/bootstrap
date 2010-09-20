@@ -1,0 +1,17 @@
+#!/bin/sh
+# $Id: bootstrap 2174 2010-01-05 15:20:37Z d_pocock $
+#echo "Running make distclean"
+#make distclean
+echo "Running aclocal" &&
+aclocal &&
+echo "Running autoheader" &&
+autoheader &&
+echo "Preparing tree" &&
+mkdir -p build && touch ChangeLog && ../scripts/svn2cl.sh -i --alternate-strip-prefix="/trunk/monitor-core/libmetrics/" --break-before-msg=1 --reparagraph
+echo "Running automake" &&
+automake --add-missing --copy 2>/dev/null
+echo "Running libtoolize" &&
+libtoolize --automake --copy && automake --add-missing --copy &&
+echo "Running autoconf" &&
+autoconf || exit 1
+echo
