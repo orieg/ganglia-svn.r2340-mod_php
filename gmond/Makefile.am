@@ -20,6 +20,10 @@ if BUILD_PYTHON
 GLDADD += modules/python/mod_python.lo
 GLDFLAGS += -lpython@PYTHON_VERSION@
 endif
+if BUILD_PHP
+GLDADD += modules/php/mod_php.lo
+GLDFLAGS += -lphp@PHP_VERSION@
+endif
 else
 GCFLAGS = -D_LARGEFILE64_SOURCE
 GLDADD = 

@@ -1,0 +1,16 @@
+/*
+  params - path to the directory where mod_php
+           should look for php metric modules
+
+  the "phpconf" files in the include directory below
+  will be scanned for configurations for those modules
+*/
+modules {
+  module {
+    name = "php_module"
+    path = "modphp.so"
+    params = "@moduledir@/php_modules"
+  }
+}
+
+include ("@sysconfdir@/conf.d/*.phpconf")
