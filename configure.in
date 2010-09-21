@@ -396,27 +396,18 @@ if test x"$enable_php" = xyes; then
     if test -f "$PHP_INCLUDE_DIR/sapi/embed/php_embed.h"; then
         PHP_INCLUDES=`$PHP_CONFIG_BIN --includes`
         CPPFLAGS+=$PHP_INCLUDES
-        AC_CHECK_HEADER([sapi/embed/php_embed.h], [],
-            [
-                AC_MSG_ERROR([your system is missing the PHP SAPI headers.])
-                enable_php="no"
-            ],
-[#ifdef _PHP_EMBED_H_
-# include <sapi/embed/php_embed.h>
-#endif
-])
     else 
         PHP_INCLUDES=""
-        AC_CHECK_HEADER([sapi/embed/php_embed.h], [],
-            [
-                AC_MSG_ERROR([your system is missing the PHP SAPI headers.])
-                enable_php="no"
-            ],
+    fi
+    AC_CHECK_HEADER([sapi/embed/php_embed.h], [],
+        [
+            AC_MSG_ERROR([your system is missing the PHP SAPI headers.])
+            enable_php="no"
+        ],
 [#ifdef _PHP_EMBED_H_
 # include <sapi/embed/php_embed.h>
 #endif
 ])
-    fi
     AC_SUBST(PHP_INCLUDES)
   else
     AC_MSG_ERROR("php-config not found")
