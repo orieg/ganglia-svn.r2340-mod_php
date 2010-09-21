@@ -353,25 +353,40 @@ if test x"$enable_php" = xyes; then
   echo
   echo "Checking for php"
 
-  # check for php config executable
-  if test -z "$PHP_BIN"; then
-    AC_PATH_PROG(PHP_CONFIG_BIN, php-config)
-  else
+  # check for php-config executable
+  if test -e "$PHP_BIN"; then
+    AC_MSG_CHECKING([for php-config])
     if test -d "$PHP_BIN"; then
-      PHP_CONFIG_BIN="$PHP_BIN/bin/php-config"
-    else if test -x "$PHP_BIN"; then
+        if test -x "$PHP_BIN/bin/php-config"; then
+            PHP_CONFIG_BIN="$PHP_BIN/bin/php-config"
+        elif test -x "$PHP_BIN/php-config"; then
+            PHP_CONFIG_BIN="$PHP_BIN/php-config"
+        fi
+    elif test -x "$PHP_BIN"; then
       PHP_CONFIG_BIN=$PHP_BIN
     fi
+    if test -z "$PHP_CONFIG_BIN"; then
+        AC_MSG_RESULT([not found using $PHP_BIN])
+    else
+        AC_MSG_RESULT([$PHP_CONFIG_BIN])
+    fi
+  fi
+  if test -z "$PHP_CONFIG_BIN"; then
+    AC_PATH_PROG([PHP_CONFIG_BIN], [php-config])
   fi
 
   if test -n "$PHP_CONFIG_BIN"; then
     # find out php version
-    AC_CACHE_CHECK([PHP version], [php_version_5],
-        [AX_COMPARE_VERSION([`$PHP_CONFIG_BIN --version`], [ge], [5.3],
-            [php_version_5="yes"],
-            [php_version_5="no"])])
-    AC_IF([test "$php_version_5" = "yes"], [PHP_VERSION=5],
-            [AC_MSG_ERROR([PHP version >= 5.3 required])])
+    PHP_FULL_VERSION=`$PHP_CONFIG_BIN --version`
+    AC_CACHE_CHECK([PHP version >= 5.3], [php_cv_version_5],
+        [AX_COMPARE_VERSION([$PHP_FULL_VERSION], [ge], [5.3],
+            [php_cv_version_5="yes"],
+            [php_cv_version_5="no"])])
+    if test "$php_cv_version_5" = "yes"; then
+        PHP_VERSION=5
+    else
+        AC_MSG_ERROR([PHP version >= 5.3 required])
+    fi
     AC_SUBST(PHP_VERSION)
 
     AC_MSG_CHECKING(PHP Include dir)
@@ -381,12 +396,20 @@ if test x"$enable_php" = xyes; then
     if test -f "$PHP_INCLUDE_DIR/sapi/embed/php_embed.h"; then
       PHP_INCLUDES=`$PHP_CONFIG_BIN --includes`
     else 
-        AC_MSG_ERROR([Can't find the PHP header file sapi/embed/php_embed.h])]
         PHP_INCLUDES=""
-        enable_php="no"
+        AC_CHECK_HEADER([sapi/embed/php_embed.h], [],
+            [
+                AC_MSG_ERROR([your system is missing the PHP SAPI headers.])
+                enable_php="no"
+            ],
+[#ifdef _PHP_EMBED_H_
+# include <sapi/embed/php_embed.h>
+#endif
+])
     fi
     AC_SUBST(PHP_INCLUDES)
   else
+    AC_MSG_ERROR("php-config not found")
     enable_php="no"
   fi
 fi

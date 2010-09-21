@@ -17,7 +17,7 @@ fi
 echo "Create distribution timestamp"
 touch Makefile.am
 echo "Running aclocal" &&
-aclocal &&
+aclocal -I m4 &&
 echo "Running autoheader" &&
 autoheader &&
 echo "Creating build" &&
