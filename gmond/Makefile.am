@@ -1,7 +1,7 @@
 
 include $(top_srcdir)/ganglia.inc
 
-SUBDIRS = modules python_modules
+SUBDIRS = modules python_modules php_modules
 
 EXTRA_DIST = gmond.aix.init gmond.solaris.init.in gmond.init gmond.init.SuSE gmond.conf.5 gmond.conf.html conf.pod
 if STATIC_BUILD
