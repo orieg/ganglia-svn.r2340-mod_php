@@ -396,6 +396,7 @@ if test x"$enable_php" = xyes; then
     if test -f "$PHP_INCLUDE_DIR/sapi/embed/php_embed.h"; then
         PHP_INCLUDES=`$PHP_CONFIG_BIN --includes`
         CPPFLAGS+=$PHP_INCLUDES
+        LDFLAGS+=" -L`$PHP_CONFIG_BIN --prefix`/lib"
     else 
         PHP_INCLUDES=""
     fi

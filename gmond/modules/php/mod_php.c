@@ -33,7 +33,6 @@
 * POSSIBILITY OF SUCH DAMAGE.
 ******************************************************************************/
 
-#include <sapi/embed/php_embed.h>
 #include <gm_metric.h>
 #include <gm_msg.h>
 #include <stdio.h>
@@ -52,6 +51,8 @@
 #include <dirent.h>
 #include <sys/stat.h>
 
+#include <sapi/embed/php_embed.h>
+
 /*
  * Declare ourselves so the configuration routines can find and know us.
  * We'll fill it in at the end of the module.
@@ -61,7 +62,7 @@ mmodule php_module;
 typedef struct
 {
     zval* phpmod;     /* The php metric module object */
-    zval* phpcb;      /* The metric call back function */
+    zval* callback;   /* The metric call back function */
     char *mod_name;   /* The name */
 }
 mapped_info_t;
@@ -77,7 +78,7 @@ typedef struct
     char desc[512];
     char groups[512];
     apr_table_t *extra_data;
-    zval* phpcb;
+    zval* callback;
 }
 php_metric_init_t;
 
@@ -149,30 +150,58 @@ static cfg_t* find_module_config(char *modname)
     return NULL;
 }
 
-static HashTable* build_params_dict(cfg_t *phpmodule)
+static zval* build_params_dict(cfg_t *phpmodule)
 {
-	/* TODO */
-}
+    int k;
+    zval *params_dict;
 
-static PhpMethodDef GangliaMethods[] = {
-    {"get_debug_msg_level", ganglia_get_debug_msg_level, METH_NOARGS,
-     "Return the debug level used by ganglia."},
-    {NULL, NULL, 0, NULL}
-};
+    /* Create params_dict as a ZVAL ARRAY */
+    MAKE_STD_ZVAL(params_dict);
+    array_init(params_dict);
+
+    if (phpmodule) {
+        for (k = 0; k < cfg_size(phpmodule, "param"); k++) {
+            cfg_t *param;
+            char *name, *value;
+
+            param = cfg_getnsec(phpmodule, "param", k);
+            name = apr_pstrdup(pool, param->title);
+            value = apr_pstrdup(pool, cfg_getstr(param, "value"));
+            if (name && value) {
+            	add_assoc_string(params_dict, name, value, 1);
+            }
+        }
+    }
+
+    return params_dict;
+}
 
 static int php_metric_init (apr_pool_t *p)
 {
 	/* TODO */
+	return 0;
 }
 
 static apr_status_t php_metric_cleanup ( void *data)
 {
 	/* TODO */
+    return APR_SUCCESS;
 }
 
 static g_val_t php_metric_handler( int metric_index )
 {
+    g_val_t val;
+    Ganglia_25metric *gmi = (Ganglia_25metric *) metric_info->elts;
+    mapped_info_t *mi = (mapped_info_t*) metric_mapping_info->elts;
+
+    memset(&val, 0, sizeof(val));
+    if (!mi[metric_index].callback) {
+        /* No call back provided for this metric */
+        return val;
+    }
+
 	/* TODO */
+    return val;
 }
 
 mmodule php_module =
