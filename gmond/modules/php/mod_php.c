@@ -254,7 +254,8 @@ static int php_metric_init (apr_pool_t *p)
 	struct dirent *entry;
 	int i;
 	char* modname;
-	zval retval, funcname, *pparamdict, *type, **server;
+	zval retval, funcname, *params, *type, **server;
+	zend_uint params_length;
 	php_metric_init_t minfo;
 	Ganglia_25metric *gmi;
 	mapped_info_t *mi;
@@ -341,31 +342,28 @@ static int php_metric_init (apr_pool_t *p)
 
         php_execute_script(&script TSRMLS_CC);
 
-        if (zend_hash_find(EG(function_table), "metric_init", strlen("metric_init"), NULL) == FAILURE) {
-            /* No metric_init function. */
-            err_msg("[PHP] Can't find the metric_init function in the php module [%s].\n", modname);
-            continue;
-        }
-
         /* Build a parameter dictionary to pass to the module */
-        pparamdict = build_params_dict(module_cfg);
-        if (!pparamdict) {
+        params = build_params_dict(module_cfg);
+        if (!params || Z_TYPE_P(params) != IS_ARRAY) {
             /* No metric_init function. */
-            err_msg("[PHP] Can't build the parameters dictionary for [%s].\n", modname);
+            err_msg("[PHP] Can't build the parameters array for [%s].\n", modname);
             continue;
         }
+        php_verbose_debug(3, "built the parameters dictionnary for the php module [%s]", modname);
 
         /* Now call the metric_init method of the python module */
         ZVAL_STRING(&funcname,"metric_init", 0);
+        params_length = zend_hash_num_elements(Z_ARRVAL_P(params));
         if (call_user_function(EG(function_table), NULL, &funcname, &retval,
-        		zend_hash_num_elements(Z_ARRVAL_P(pparamdict)), &pparamdict TSRMLS_CC) == FAILURE) {
+        		params_length, &params TSRMLS_CC) == FAILURE) {
         	/* failed calling metric_init */
-            err_msg("[PHP] Can't call the metric_init function in the php module [%s].\n", modname);
+            err_msg("[PHP] Can't call the metric_init function in the php module [%s]\n", modname);
             continue;
         }
-/*
-        if (PyList_Check(pobj)) {
-            int j;
+        php_verbose_debug(3, "called the metric_init function for the php module [%s]\n", modname);
+
+        if (Z_TYPE_P(&retval) == IS_ARRAY) {
+            /*int j;
             int size = PyList_Size(pobj);
             for (j = 0; j < size; j++) {
                 PyObject* plobj = PyList_GetItem(pobj, j);
@@ -378,9 +376,9 @@ static int php_metric_init (apr_pool_t *p)
                     mi->mod_name = apr_pstrdup(pool, modname);
                     mi->pcb = minfo.pcb;
                 }
-            }
+            }*/
         }
-        else if (PyMapping_Check(pobj)) {
+        /*else if (PyMapping_Check(pobj)) {
             fill_metric_info(pobj, &minfo, modname, pool);
             gmi = (Ganglia_25metric*)apr_array_push(metric_info);
             fill_gmi(gmi, &minfo);
@@ -392,7 +390,7 @@ static int php_metric_init (apr_pool_t *p)
         Py_DECREF(pobj);
         Py_DECREF(pinitfunc);
         gtstate = PyEval_SaveThread();
-        */
+*/
     }
     closedir(dp);
 

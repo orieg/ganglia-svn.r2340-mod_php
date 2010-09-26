@@ -41,12 +41,14 @@ $Constant_Value = 50;
 function Random_Numbers($name) {
     // Return a random number.
     global $Random_Max;
+    echo "[php example] Random_Numbers\n";
     return rand(0, $Random_Max);
 }
 
 function Constant_Number($name) {
     // Return a constant number.
     global $Constant_Value;
+    echo "[php example] Constant_Number\n";
     return (int) $Constant_Value;
 }
 
@@ -97,10 +99,12 @@ function metric_init($params) {
 
 function metric_cleanup() {
     // Clean up the metric module.
+    echo "[php example] metric cleanup\n";
 }
 
 #This code is for debugging and unit testing
 if ($_SERVER['SAPI_TYPE'] != 'embed') {
+	print "Non-embed mode\n";
     $params = array(
         'RandomMax' => '500',
         'ConstantValue' => '322'
