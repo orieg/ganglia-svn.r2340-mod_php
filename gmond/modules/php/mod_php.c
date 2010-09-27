@@ -487,11 +487,12 @@ static int php_metric_init (apr_pool_t *p)
         php_verbose_debug(3, "called the metric_init function for the php module [%s]\n", modname);
 
         if (Z_TYPE_P(&retval) == IS_ARRAY) {
-
             for(zend_hash_internal_pointer_reset_ex(Z_ARRVAL_P(&retval), &pos);
             		zend_hash_get_current_key_ex(Z_ARRVAL_P(&retval), &key, &keylen, &idx, 0, &pos) == SUCCESS;
             		zend_hash_move_forward_ex(Z_ARRVAL_P(&retval), &pos)) {
+        		php_verbose_debug(3, "retval type %d : %d", Z_TYPE_PP(current), IS_ARRAY);
             	if (Z_TYPE_PP(current) == IS_ARRAY) {
+            		php_verbose_debug(3, "metric info [%s]", modname);
                     fill_metric_info(*current, &minfo, modname, pool);
                     gmi = (Ganglia_25metric*)apr_array_push(metric_info);
                     fill_gmi(gmi, &minfo);
@@ -532,6 +533,7 @@ static apr_status_t php_metric_cleanup ( void *data)
 
 static g_val_t php_metric_handler( int metric_index )
 {
+	zval retval, funcname, *param;
     g_val_t val;
     Ganglia_25metric *gmi = (Ganglia_25metric *) metric_info->elts;
     mapped_info_t *mi = (mapped_info_t*) metric_mapping_info->elts;
@@ -544,7 +546,57 @@ static g_val_t php_metric_handler( int metric_index )
         return val;
     }
 
-	/* TODO */
+    /* Call the metric handler call back for this metric */
+    ZVAL_STRING(&funcname, mi[metric_index].callback, 0);
+    ZVAL_STRING(param, gmi[metric_index].name, 0);
+    if (call_user_function(EG(function_table), NULL, &funcname, &retval,
+    		1, &param TSRMLS_CC) == FAILURE) {
+    	/* failed calling metric_init */
+        err_msg("[PHP]  Can't call the metric handler function for [%s] in the php module [%s].\n",
+        		gmi[metric_index].name, mi[metric_index].mod_name);
+        return val;
+    }
+    php_verbose_debug(3, "Called the metric handler function for [%s] in the php module [%s].\n",
+        		gmi[metric_index].name, mi[metric_index].mod_name);
+
+    switch (gmi[metric_index].type) {
+        case GANGLIA_VALUE_STRING:
+        {
+        	convert_to_string(&retval);
+        	strcpy(val.str, Z_STRVAL_P(&retval));
+            break;
+        }
+        case GANGLIA_VALUE_UNSIGNED_INT:
+        {
+        	convert_to_long(&retval);
+            val.uint32 = (unsigned int) Z_LVAL_P(&retval);
+            break;
+        }
+        case GANGLIA_VALUE_INT:
+        {
+        	convert_to_long(&retval);
+            val.int32 = (int) Z_LVAL_P(&retval);
+            break;
+        }
+        case GANGLIA_VALUE_FLOAT:
+        {
+        	convert_to_double(&retval);
+            val.f = Z_DVAL_P(&retval);
+            break;
+        }
+        case GANGLIA_VALUE_DOUBLE:
+        {
+        	convert_to_double(&retval);
+            val.d = Z_DVAL_P(&retval);
+            break;
+        }
+        default:
+        {
+            memset(&val, 0, sizeof(val));
+            break;
+        }
+    }
+
     return val;
 }
 
