@@ -59,7 +59,7 @@ function metric_init($params) {
     global $Random_Max;
     global $Constant_Value;
     
-    echo "[php example] Received the following parameters\n";
+    echo "[php example] Received the following parameters:\n";
     var_dump($params);
     
     if (in_array('RandomMax', $params)) {
@@ -94,6 +94,10 @@ function metric_init($params) {
     );
 
     $descriptors = array($d1, $d2);
+    
+    echo "[php example] Returning descriptors :\n";
+    var_dump($descriptors);
+    
     return $descriptors;
 }
 
