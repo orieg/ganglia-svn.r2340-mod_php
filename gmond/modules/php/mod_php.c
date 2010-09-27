@@ -89,7 +89,7 @@ typedef struct
     char desc[512];
     char groups[512];
     apr_table_t *extra_data;
-    char callback[128];
+    char *callback;
 }
 php_metric_init_t;
 
@@ -133,9 +133,11 @@ static void fill_metric_info(zval* dict, php_metric_init_t* minfo, char *modname
     /* create the apr table here */
     minfo->extra_data = apr_table_make(pool, 2);
 
-    for(zend_hash_internal_pointer_reset_ex(Z_ARRVAL_P(dict), &pos);
-    		zend_hash_get_current_key_ex(Z_ARRVAL_P(dict), &key, &keylen, &idx, 0, &pos) == SUCCESS;
-    		zend_hash_move_forward_ex(Z_ARRVAL_P(dict), &pos)) {
+    zend_hash_internal_pointer_reset_ex(Z_ARRVAL_P(dict), &pos);
+    for(;; zend_hash_move_forward_ex(Z_ARRVAL_P(dict), &pos)) {
+
+        if (zend_hash_get_current_key_ex(Z_ARRVAL_P(dict), &key, &keylen, &idx, 0, &pos) == HASH_KEY_NON_EXISTANT)
+            break;
 
     	if (zend_hash_get_current_data_ex(Z_ARRVAL_P(dict), (void**) &current, &pos) == FAILURE) {
             err_msg("[PHP] Can't get data for key [%s] in php module [%s].\n", key, modname);
@@ -152,7 +154,7 @@ static void fill_metric_info(zval* dict, php_metric_init_t* minfo, char *modname
         }
 
         if (!strcasecmp(key, "call_back")) {
-        	if (!strncpy(minfo->callback, Z_STRVAL_PP(current), sizeof(minfo->callback))) {
+        	if (!(minfo->callback = estrndup(Z_STRVAL_PP(current), Z_STRLEN_PP(current)))) {
                 err_msg("[PHP] No php call back given for metric [%s] in module [%s]. Will not call\n",
                         metric_name, modname);
             }
@@ -228,6 +230,7 @@ static void fill_metric_info(zval* dict, php_metric_init_t* minfo, char *modname
         else {
             err_msg("[PHP] Extra data key [%s] could not be processed.\n", key);
         }
+    
     }
 
     php_verbose_debug(3, "name: %s", minfo->mname);
@@ -386,7 +389,7 @@ static int php_metric_init (apr_pool_t *p)
 	zval retval, funcname, *params, *type, **server;
 	zend_uint params_length;
 	zend_file_handle script;
-	zval **zval_vector;
+	zval **zval_vector[1];
 
 	php_verbose_debug(3, "php_metric_init");
 	php_verbose_debug(2, "php_modules path: %s", path);
@@ -495,27 +498,30 @@ static int php_metric_init (apr_pool_t *p)
         if (Z_TYPE_P(&retval) == IS_ARRAY) {
 			php_verbose_debug(2, "get %d descriptors for the php module [%s]",
 					zend_hash_num_elements(Z_ARRVAL(retval)), modname);
-        	ht = Z_ARRVAL(retval);
-        	int i;
+
         	zend_hash_internal_pointer_reset_ex(Z_ARRVAL(retval), &pos);
         	while (zend_hash_get_current_data_ex(Z_ARRVAL(retval), (void**)&current, &pos) == SUCCESS) {
+
 				if (zend_hash_get_current_key_ex(Z_ARRVAL(retval), &key, &keylen, &idx, 0, &pos) == HASH_KEY_NON_EXISTANT)
 					break;
-				zend_hash_get_current_data_ex(Z_ARRVAL(retval), (void **) &current, &pos);
+
 				zval duplicate = **current;
 				zval_copy_ctor(&duplicate);
 				convert_to_string(&duplicate);
+
         		php_verbose_debug(3, "retval : %s", duplicate);
+
             	if (Z_TYPE_PP(current) == IS_ARRAY) {
-            		php_verbose_debug(3, "metric info [%s]", modname);
                     fill_metric_info(*current, &minfo, modname, pool);
+            		php_verbose_debug(3, "metric info [%s] (callback : %s)", modname, minfo.callback);
                     gmi = (Ganglia_25metric*)apr_array_push(metric_info);
                     fill_gmi(gmi, &minfo);
                     mi = (mapped_info_t*)apr_array_push(metric_mapping_info);
-                    mi->phpmod = (*current);
+                    mi->phpmod = *current;
                     mi->mod_name = apr_pstrdup(pool, modname);
                     mi->callback = minfo.callback;
             	}
+
     			zend_hash_move_forward_ex(Z_ARRVAL(retval), &pos);
             }
         }
@@ -549,7 +555,7 @@ static apr_status_t php_metric_cleanup ( void *data)
 
 static g_val_t php_metric_handler( int metric_index )
 {
-	zval retval, funcname, *param;
+	zval retval, funcname, *tmp, *param;
     g_val_t val;
     Ganglia_25metric *gmi = (Ganglia_25metric *) metric_info->elts;
     mapped_info_t *mi = (mapped_info_t*) metric_mapping_info->elts;
@@ -562,18 +568,23 @@ static g_val_t php_metric_handler( int metric_index )
         return val;
     }
 
+    php_verbose_debug(3, ">>> callback : %s", (char *) mi[metric_index].callback);
+
+    ZVAL_STRING(&funcname, mi[metric_index].callback, 1);
+    MAKE_STD_ZVAL(tmp);
+    ZVAL_STRING(tmp, gmi[metric_index].name, 1);
+    zval **zval_vector[] = {tmp};
+
     /* Call the metric handler call back for this metric */
-    ZVAL_STRING(&funcname, mi[metric_index].callback, 0);
-    ZVAL_STRING(param, gmi[metric_index].name, 0);
     if (call_user_function(EG(function_table), NULL, &funcname, &retval,
-    		1, &param TSRMLS_CC) == FAILURE) {
+    		1, zval_vector TSRMLS_CC) == FAILURE) {
     	/* failed calling metric_init */
-        err_msg("[PHP]  Can't call the metric handler function for [%s] in the php module [%s].\n",
-        		gmi[metric_index].name, mi[metric_index].mod_name);
+        err_msg("[PHP]  Can't call the metric handler function [%s] for [%s] in the php module [%s].\n",
+        		&funcname, gmi[metric_index].name, mi[metric_index].mod_name);
         return val;
     }
-    php_verbose_debug(3, "Called the metric handler function for [%s] in the php module [%s].\n",
-        		gmi[metric_index].name, mi[metric_index].mod_name);
+    php_verbose_debug(3, "Called the metric handler function [%s] for [%s] in the php module [%s].\n",
+    		mi[metric_index].callback, gmi[metric_index].name, mi[metric_index].mod_name);
 
     switch (gmi[metric_index].type) {
         case GANGLIA_VALUE_STRING:
