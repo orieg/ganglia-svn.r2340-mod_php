@@ -385,7 +385,6 @@ static int php_metric_init (apr_pool_t *p)
     char *key;
     uint keylen;
     ulong idx;
-    HashTable *ht;
     HashPosition pos;
 	zval retval, funcname, *params, **current, **zval_vector[1];
 	zend_uint params_length;
@@ -550,7 +549,7 @@ static apr_status_t php_metric_cleanup ( void *data)
     for (i = 0; i < metric_mapping_info->nelts; i++) {
         if (mi[i].phpmod) {
         	efree(mi[i].callback);
-        	zval_ptr_dtor(mi[i].phpmod);
+        	zval_ptr_dtor(&mi[i].phpmod);
 
             /* Set all modules that fall after this once with the same
              * module pointer to NULL so metric_cleanup only gets called
@@ -590,11 +589,11 @@ static g_val_t php_metric_handler( int metric_index )
     ZVAL_STRING(&funcname, mi[metric_index].callback, 1);
     MAKE_STD_ZVAL(tmp);
     ZVAL_STRING(tmp, gmi[metric_index].name, 1);
-    zval_vector[0] = tmp;
+    zval_vector[0] = &tmp;
 
     /* Call the metric handler call back for this metric */
     if (call_user_function(EG(function_table), NULL, &funcname, &retval,
-    		1, zval_vector TSRMLS_CC) == FAILURE) {
+    		1, *zval_vector TSRMLS_CC) == FAILURE) {
     	/* failed calling metric_init */
         err_msg("[PHP]  Can't call the metric handler function [%s] for [%s] in the php module [%s].\n",
         		&funcname, gmi[metric_index].name, mi[metric_index].mod_name);
