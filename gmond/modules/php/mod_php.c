@@ -99,6 +99,8 @@ static apr_array_header_t *metric_info = NULL;
 static apr_array_header_t *metric_mapping_info = NULL;
 static apr_status_t php_metric_cleanup ( void *data);
 
+static zval *sapi_type, **server;
+
 char modname_bfr[PATH_MAX];
 static char* is_php_module(const char* fname)
 {
@@ -385,11 +387,9 @@ static int php_metric_init (apr_pool_t *p)
     ulong idx;
     HashTable *ht;
     HashPosition pos;
-    zval **current;
-	zval retval, funcname, *params, *type, **server;
+	zval retval, funcname, *params, **current, **zval_vector[1];
 	zend_uint params_length;
 	zend_file_handle script;
-	zval **zval_vector[1];
 
 	php_verbose_debug(3, "php_metric_init");
 	php_verbose_debug(2, "php_modules path: %s", path);
@@ -434,9 +434,9 @@ static int php_metric_init (apr_pool_t *p)
 	zend_hash_find(&EG(symbol_table), "_SERVER", sizeof("_SERVER"), (void**) &server);
 
 	/* $_SERVER['SAPI_TYPE'] = 'embed' */
-	ALLOC_INIT_ZVAL(type);
-	ZVAL_STRING(type, "embed", 1);
-	ZEND_SET_SYMBOL(Z_ARRVAL_PP(server), "SAPI_TYPE", type);
+	ALLOC_INIT_ZVAL(sapi_type);
+	ZVAL_STRING(sapi_type, "embed", 1);
+	ZEND_SET_SYMBOL(Z_ARRVAL_PP(server), "SAPI_TYPE", sapi_type);
 
     i = 0;
 
@@ -484,11 +484,11 @@ static int php_metric_init (apr_pool_t *p)
         php_verbose_debug(2, "found %d params for the php module [%s]", params_length, modname);
 
         /* Convert params to zval vector */
-        zval_vector[0] = params;
+        zval_vector[0] = &params;
 
         /* Now call the metric_init method of the python module */
         if (call_user_function(EG(function_table), NULL, &funcname, &retval,
-        		1, zval_vector TSRMLS_CC) == FAILURE) {
+        		1, *zval_vector TSRMLS_CC) == FAILURE) {
         	/* failed calling metric_init */
             err_msg("[PHP] Can't call the metric_init function in the php module [%s]\n", modname);
             continue;
@@ -505,12 +505,6 @@ static int php_metric_init (apr_pool_t *p)
 				if (zend_hash_get_current_key_ex(Z_ARRVAL(retval), &key, &keylen, &idx, 0, &pos) == HASH_KEY_NON_EXISTANT)
 					break;
 
-				zval duplicate = **current;
-				zval_copy_ctor(&duplicate);
-				convert_to_string(&duplicate);
-
-        		php_verbose_debug(3, "retval : %s", duplicate);
-
             	if (Z_TYPE_PP(current) == IS_ARRAY) {
                     fill_metric_info(*current, &minfo, modname, pool);
             		php_verbose_debug(3, "metric info [%s] (callback : %s)", modname, minfo.callback);
@@ -525,6 +519,7 @@ static int php_metric_init (apr_pool_t *p)
     			zend_hash_move_forward_ex(Z_ARRVAL(retval), &pos);
             }
         }
+        zval_ptr_dtor(&params);
     }
     closedir(dp);
 
@@ -556,6 +551,17 @@ static apr_status_t php_metric_cleanup ( void *data)
         if (mi[i].phpmod) {
         	efree(mi[i].callback);
         	zval_ptr_dtor(mi[i].phpmod);
+
+            /* Set all modules that fall after this once with the same
+             * module pointer to NULL so metric_cleanup only gets called
+             * once on the module.
+             */
+            smi = (mapped_info_t*) metric_mapping_info->elts;
+            for (j = i+1; j < metric_mapping_info->nelts; j++) {
+                if (smi[j].phpmod == mi[i].phpmod) {
+                    smi[j].phpmod = NULL;
+                }
+            }
         }
     }
 
@@ -596,6 +602,8 @@ static g_val_t php_metric_handler( int metric_index )
     }
     php_verbose_debug(3, "Called the metric handler function [%s] for [%s] in the php module [%s].\n",
     		mi[metric_index].callback, gmi[metric_index].name, mi[metric_index].mod_name);
+
+    zval_ptr_dtor(&tmp);
 
     switch (gmi[metric_index].type) {
         case GANGLIA_VALUE_STRING:
