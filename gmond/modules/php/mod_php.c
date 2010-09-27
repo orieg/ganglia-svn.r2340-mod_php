@@ -546,16 +546,27 @@ static int php_metric_init (apr_pool_t *p)
 
 static apr_status_t php_metric_cleanup ( void *data)
 {
+    mapped_info_t *mi, *smi;
+    int i, j;
+
 	php_verbose_debug(3, "php_metric_cleanup");
+
+    mi = (mapped_info_t*) metric_mapping_info->elts;
+    for (i = 0; i < metric_mapping_info->nelts; i++) {
+        if (mi[i].phpmod) {
+        	efree(mi[i].callback);
+        	zval_ptr_dtor(mi[i].phpmod);
+        }
+    }
+
 	php_embed_shutdown(TSRMLS_C);
 
-	/* TODO */
     return APR_SUCCESS;
 }
 
 static g_val_t php_metric_handler( int metric_index )
 {
-	zval retval, funcname, *tmp, *param;
+	zval retval, funcname, *tmp, *param, **zval_vector[1];
     g_val_t val;
     Ganglia_25metric *gmi = (Ganglia_25metric *) metric_info->elts;
     mapped_info_t *mi = (mapped_info_t*) metric_mapping_info->elts;
@@ -573,7 +584,7 @@ static g_val_t php_metric_handler( int metric_index )
     ZVAL_STRING(&funcname, mi[metric_index].callback, 1);
     MAKE_STD_ZVAL(tmp);
     ZVAL_STRING(tmp, gmi[metric_index].name, 1);
-    zval **zval_vector[] = {tmp};
+    zval_vector[0] = tmp;
 
     /* Call the metric handler call back for this metric */
     if (call_user_function(EG(function_table), NULL, &funcname, &retval,
@@ -591,30 +602,35 @@ static g_val_t php_metric_handler( int metric_index )
         {
         	convert_to_string(&retval);
         	strcpy(val.str, Z_STRVAL_P(&retval));
+        	php_verbose_debug(3, "string: %s", val.str);
             break;
         }
         case GANGLIA_VALUE_UNSIGNED_INT:
         {
         	convert_to_long(&retval);
             val.uint32 = (unsigned int) Z_LVAL_P(&retval);
+        	php_verbose_debug(3, "uint: %i", val.uint32);
             break;
         }
         case GANGLIA_VALUE_INT:
         {
         	convert_to_long(&retval);
             val.int32 = (int) Z_LVAL_P(&retval);
+        	php_verbose_debug(3, "int: %i", val.int32);
             break;
         }
         case GANGLIA_VALUE_FLOAT:
         {
         	convert_to_double(&retval);
             val.f = Z_DVAL_P(&retval);
+        	php_verbose_debug(3, "float: %d", val.f);
             break;
         }
         case GANGLIA_VALUE_DOUBLE:
         {
         	convert_to_double(&retval);
             val.d = Z_DVAL_P(&retval);
+        	php_verbose_debug(3, "double: %d", val.d);
             break;
         }
         default:
