@@ -41,6 +41,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <unistd.h>
+#include <time.h>
 
 #include "file.h"
 
@@ -59,7 +60,7 @@
 
 #define php_verbose_debug(debug_level, ...) { \
 	if (get_debug_msg_level() > debug_level) { \
-	   debug_msg(__VA_ARGS__); \
+		debug_msg(__VA_ARGS__); \
 	} \
 }
 
@@ -71,8 +72,8 @@ mmodule php_module;
 
 typedef struct
 {
-    zval* phpmod;     /* The php metric module object */
-    zval* callback;   /* The metric call back function */
+    zval *phpmod;     /* The php metric module object */
+    char *callback;   /* The metric call back function */
     char *mod_name;   /* The name */
 }
 mapped_info_t;
@@ -88,7 +89,7 @@ typedef struct
     char desc[512];
     char groups[512];
     apr_table_t *extra_data;
-    zval* callback;
+    char callback[128];
 }
 php_metric_init_t;
 
@@ -116,10 +117,129 @@ static char* is_php_module(const char* fname)
     return modname_bfr;
 }
 
-static void fill_metric_info(HashTable* ht, php_metric_init_t* minfo, char *modname, apr_pool_t *pool)
+static void fill_metric_info(zval* dict, php_metric_init_t* minfo, char *modname, apr_pool_t *pool)
 {
-	/* TODO */
+    char *metric_name = "";
+    char *key;
+    uint keylen;
+    ulong idx;
+    HashPosition pos;
+    zval **current;
+
 	php_verbose_debug(3, "fill_metric_info");
+
+    memset(minfo, 0, sizeof(*minfo));
+
+    /* create the apr table here */
+    minfo->extra_data = apr_table_make(pool, 2);
+
+    for(zend_hash_internal_pointer_reset_ex(Z_ARRVAL_P(dict), &pos);
+    		zend_hash_get_current_key_ex(Z_ARRVAL_P(dict), &key, &keylen, &idx, 0, &pos) == SUCCESS;
+    		zend_hash_move_forward_ex(Z_ARRVAL_P(dict), &pos)) {
+
+    	if (zend_hash_get_current_data_ex(Z_ARRVAL_P(dict), (void**) &current, &pos) == FAILURE) {
+            err_msg("[PHP] Can't get data for key [%s] in php module [%s].\n", key, modname);
+            continue;
+    	}
+
+        if (!strcasecmp(key, "name")) {
+        	if (!strncpy(minfo->mname, Z_STRVAL_PP(current), sizeof(minfo->mname))) {
+                err_msg("[PHP] No metric name given in php module [%s].\n", modname);
+            }
+            else
+                metric_name = minfo->mname;
+            continue;
+        }
+
+        if (!strcasecmp(key, "call_back")) {
+        	if (!strncpy(minfo->callback, Z_STRVAL_PP(current), sizeof(minfo->callback))) {
+                err_msg("[PHP] No php call back given for metric [%s] in module [%s]. Will not call\n",
+                        metric_name, modname);
+            }
+            continue;
+        }
+
+        if (!strcasecmp(key, "time_max")) {
+            if (!(minfo->tmax = (int) Z_LVAL_PP(current))) {
+                minfo->tmax = 60;
+                err_msg("[PHP] No time max given for metric [%s] in module [%s]. Using %d.\n",
+                        metric_name, modname, minfo->tmax);
+            }
+            continue;
+        }
+
+        if (!strcasecmp(key, "value_type")) {
+        	if (!strncpy(minfo->vtype, Z_STRVAL_PP(current), sizeof(minfo->vtype))) {
+                strcpy (minfo->vtype, "uint");
+                err_msg("[PHP] No value type given for metric [%s] in module [%s]. Using %s.\n",
+                        metric_name, modname, minfo->vtype);
+            }
+            continue;
+        }
+
+        if (!strcasecmp(key, "units")) {
+        	if (!strncpy(minfo->units, Z_STRVAL_PP(current), sizeof(minfo->units))) {
+                strcpy (minfo->units, "unknown");
+                err_msg("[PHP] No metric units given for metric [%s] in module [%s]. Using %s.\n",
+                        metric_name, modname, minfo->units);
+            }
+            continue;
+        }
+
+        if (!strcasecmp(key, "slope")) {
+        	if (!strncpy(minfo->slope, Z_STRVAL_PP(current), sizeof(minfo->slope))) {
+                strcpy (minfo->slope, "both");
+                err_msg("[PHP] No slope given for metric [%s] in module [%s]. Using %s.\n",
+                        metric_name, modname, minfo->slope);
+            }
+            continue;
+        }
+
+        if (!strcasecmp(key, "format")) {
+        	if (!strncpy(minfo->format, Z_STRVAL_PP(current), sizeof(minfo->format))) {
+                strcpy (minfo->format, "%u");
+                err_msg("[PHP] No format given for metric [%s] in module [%s]. Using %s.\n",
+                        metric_name, modname, minfo->format);
+            }
+            continue;
+        }
+
+        if (!strcasecmp(key, "description")) {
+        	if (!strncpy(minfo->desc, Z_STRVAL_PP(current), sizeof(minfo->desc))) {
+                strcpy (minfo->desc, "unknown metric");
+                err_msg("[PHP] No description given for metric [%s] in module [%s]. Using %s.\n",
+                        metric_name, modname, minfo->desc);
+            }
+            continue;
+        }
+
+        if (!strcasecmp(key, "groups")) {
+        	if (!strncpy(minfo->groups, Z_STRVAL_PP(current), sizeof(minfo->groups))) {
+                strcpy (minfo->groups, "");
+            }
+            continue;
+        }
+
+        if (Z_TYPE_PP(current) == IS_LONG || Z_TYPE_PP(current) == IS_DOUBLE ||
+        		Z_TYPE_PP(current) == IS_BOOL || Z_TYPE_PP(current) == IS_STRING) {
+        	convert_to_string(*current);
+            apr_table_add(minfo->extra_data, key, Z_STRVAL_P(*current));
+        }
+        else {
+            err_msg("[PHP] Extra data key [%s] could not be processed.\n", key);
+        }
+    }
+
+    php_verbose_debug(3, "name: %s", minfo->mname);
+    php_verbose_debug(3, "callback: %s", minfo->callback);
+    php_verbose_debug(3, "time_max: %d", minfo->tmax);
+    php_verbose_debug(3, "value_type: %s", minfo->vtype);
+    php_verbose_debug(3, "units: %s", minfo->units);
+    php_verbose_debug(3, "slope: %s", minfo->slope);
+    php_verbose_debug(3, "format: %s", minfo->format);
+    php_verbose_debug(3, "description: %s", minfo->desc);
+    php_verbose_debug(3, "groups: %s", minfo->groups);
+
 }
 
 static void fill_gmi(Ganglia_25metric* gmi, php_metric_init_t* minfo)
@@ -248,22 +368,26 @@ static zval* build_params_dict(cfg_t *phpmodule)
 
 static int php_metric_init (apr_pool_t *p)
 {
-	php_verbose_debug(3, "php_metric_init");
-
 	DIR *dp;
 	struct dirent *entry;
 	int i;
 	char* modname;
-	zval retval, funcname, *params, *type, **server;
-	zend_uint params_length;
 	php_metric_init_t minfo;
 	Ganglia_25metric *gmi;
 	mapped_info_t *mi;
 	const char* path = php_module.module_params;
 	cfg_t *module_cfg;
 
+    char *key;
+    uint keylen;
+    ulong idx;
+    HashPosition pos;
+    zval **current;
+	zval retval, funcname, *params, *type, **server;
+	zend_uint params_length;
 	zend_file_handle script;
 
+	php_verbose_debug(3, "php_metric_init");
 	php_verbose_debug(2, "php_modules path: %s", path);
 
 	/* Allocate a pool that will be used by this module */
@@ -363,34 +487,21 @@ static int php_metric_init (apr_pool_t *p)
         php_verbose_debug(3, "called the metric_init function for the php module [%s]\n", modname);
 
         if (Z_TYPE_P(&retval) == IS_ARRAY) {
-            /*int j;
-            int size = PyList_Size(pobj);
-            for (j = 0; j < size; j++) {
-                PyObject* plobj = PyList_GetItem(pobj, j);
-                if (PyMapping_Check(plobj)) {
-                    fill_metric_info(plobj, &minfo, modname, pool);
+
+            for(zend_hash_internal_pointer_reset_ex(Z_ARRVAL_P(&retval), &pos);
+            		zend_hash_get_current_key_ex(Z_ARRVAL_P(&retval), &key, &keylen, &idx, 0, &pos) == SUCCESS;
+            		zend_hash_move_forward_ex(Z_ARRVAL_P(&retval), &pos)) {
+            	if (Z_TYPE_PP(current) == IS_ARRAY) {
+                    fill_metric_info(*current, &minfo, modname, pool);
                     gmi = (Ganglia_25metric*)apr_array_push(metric_info);
                     fill_gmi(gmi, &minfo);
                     mi = (mapped_info_t*)apr_array_push(metric_mapping_info);
-                    mi->pmod = pmod;
+                    mi->phpmod = (*current);
                     mi->mod_name = apr_pstrdup(pool, modname);
-                    mi->pcb = minfo.pcb;
-                }
-            }*/
+                    mi->callback = minfo.callback;
+            	}
+            }
         }
-        /*else if (PyMapping_Check(pobj)) {
-            fill_metric_info(pobj, &minfo, modname, pool);
-            gmi = (Ganglia_25metric*)apr_array_push(metric_info);
-            fill_gmi(gmi, &minfo);
-            mi = (mapped_info_t*)apr_array_push(metric_mapping_info);
-            mi->pmod = pmod;
-            mi->mod_name = apr_pstrdup(pool, modname);
-            mi->pcb = minfo.pcb;
-        }
-        Py_DECREF(pobj);
-        Py_DECREF(pinitfunc);
-        gtstate = PyEval_SaveThread();
-*/
     }
     closedir(dp);
 
