@@ -75,6 +75,7 @@ typedef struct
     zval *phpmod;     /* The php metric module object */
     char *callback;   /* The metric call back function */
     char *mod_name;   /* The name */
+    zend_file_handle *script; /* PHP script to run */
 }
 mapped_info_t;
 
@@ -389,6 +390,7 @@ static int php_metric_init (apr_pool_t *p)
 	zval retval, funcname, *params, **current, **zval_vector[1];
 	zend_uint params_length;
 	zend_file_handle script;
+    char file[256];
 
 	php_verbose_debug(3, "php_metric_init");
 	php_verbose_debug(2, "php_modules path: %s", path);
@@ -440,6 +442,7 @@ static int php_metric_init (apr_pool_t *p)
     i = 0;
 
     while ((entry = readdir(dp)) != NULL) {
+    	//php_request_startup(TSRMLS_C);
         modname = is_php_module(entry->d_name);
 
         if (modname == NULL)
@@ -452,7 +455,6 @@ static int php_metric_init (apr_pool_t *p)
         if (!module_cfg)
             continue;
 
-        char file[256];
         strcpy(file, path);
         strcat(file, "/");
         strcat(file, modname);
@@ -511,6 +513,8 @@ static int php_metric_init (apr_pool_t *p)
                     fill_gmi(gmi, &minfo);
                     mi = (mapped_info_t*)apr_array_push(metric_mapping_info);
                     mi->phpmod = *current;
+                    zval_add_ref(&current);
+                    mi->script = &script;
                     mi->mod_name = apr_pstrdup(pool, modname);
                     mi->callback = minfo.callback;
             	}
@@ -519,6 +523,7 @@ static int php_metric_init (apr_pool_t *p)
             }
         }
         zval_ptr_dtor(&params);
+        //php_request_shutdown(NULL);
     }
     closedir(dp);
 
@@ -535,6 +540,7 @@ static int php_metric_init (apr_pool_t *p)
     memset (mi, 0, sizeof(*mi));
 
     php_module.metrics_info = (Ganglia_25metric *)metric_info->elts;
+
 	return 0;
 }
 
@@ -571,7 +577,7 @@ static apr_status_t php_metric_cleanup ( void *data)
 
 static g_val_t php_metric_handler( int metric_index )
 {
-	zval retval, funcname, *tmp, *param, **zval_vector[1];
+	zval retval, funcname, *tmp, **zval_vector[1];
     g_val_t val;
     Ganglia_25metric *gmi = (Ganglia_25metric *) metric_info->elts;
     mapped_info_t *mi = (mapped_info_t*) metric_mapping_info->elts;
