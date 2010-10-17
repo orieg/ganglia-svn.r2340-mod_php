@@ -157,7 +157,7 @@ static void fill_metric_info(zval* dict, php_metric_init_t* minfo, char *modname
         }
 
         if (!strcasecmp(key, "call_back")) {
-        	if (!(minfo->callback = estrndup(Z_STRVAL_PP(current), Z_STRLEN_PP(current)))) {
+        	if (!(minfo->callback = pestrndup(Z_STRVAL_PP(current), Z_STRLEN_PP(current), 1))) {
                 err_msg("[PHP] No php call back given for metric [%s] in module [%s]. Will not call\n",
                         metric_name, modname);
             }
@@ -442,7 +442,6 @@ static int php_metric_init (apr_pool_t *p)
     i = 0;
 
     while ((entry = readdir(dp)) != NULL) {
-    	//php_request_startup(TSRMLS_C);
         modname = is_php_module(entry->d_name);
 
         if (modname == NULL)
@@ -461,7 +460,8 @@ static int php_metric_init (apr_pool_t *p)
         strcat(file, ".php");
 
         script.type = ZEND_HANDLE_FP;
-        script.filename = file;
+        script.filename = pestrndup((char *)&file, sizeof(file), 1);
+        //efree(&file);
         script.opened_path = NULL;
         script.free_filename = 0;
         if (!(script.handle.fp = fopen(script.filename, "rb"))) {
@@ -469,6 +469,7 @@ static int php_metric_init (apr_pool_t *p)
         	continue;
         }
 
+        php_verbose_debug(2, ">>> execute php script %s", script.filename);
         php_execute_script(&script TSRMLS_CC);
 
         /* Build a parameter dictionary to pass to the module */
@@ -494,6 +495,7 @@ static int php_metric_init (apr_pool_t *p)
             err_msg("[PHP] Can't call the metric_init function in the php module [%s]\n", modname);
             continue;
         }
+
         php_verbose_debug(3, "called the metric_init function for the php module [%s]\n", modname);
 
         if (Z_TYPE_P(&retval) == IS_ARRAY) {
@@ -513,7 +515,7 @@ static int php_metric_init (apr_pool_t *p)
                     fill_gmi(gmi, &minfo);
                     mi = (mapped_info_t*)apr_array_push(metric_mapping_info);
                     mi->phpmod = *current;
-                    zval_add_ref(&current);
+                    //pemalloc(sizeof(&script), 1);
                     mi->script = &script;
                     mi->mod_name = apr_pstrdup(pool, modname);
                     mi->callback = minfo.callback;
@@ -522,8 +524,14 @@ static int php_metric_init (apr_pool_t *p)
     			zend_hash_move_forward_ex(Z_ARRVAL(retval), &pos);
             }
         }
+
+        zval_dtor(&retval);
         zval_ptr_dtor(&params);
-        //php_request_shutdown(NULL);
+
+        zend_try {
+        	php_request_shutdown(NULL);
+        } zend_end_try();
+
     }
     closedir(dp);
 
@@ -556,6 +564,7 @@ static apr_status_t php_metric_cleanup ( void *data)
         if (mi[i].phpmod) {
         	efree(mi[i].callback);
         	zval_ptr_dtor(&mi[i].phpmod);
+        	zend_file_handle_dtor(mi[i].script);
 
             /* Set all modules that fall after this once with the same
              * module pointer to NULL so metric_cleanup only gets called
@@ -572,6 +581,9 @@ static apr_status_t php_metric_cleanup ( void *data)
 
 	php_embed_shutdown(TSRMLS_C);
 
+	zval_ptr_dtor(&sapi_type);
+	zval_dtor(*server);
+
     return APR_SUCCESS;
 }
 
@@ -582,6 +594,8 @@ static g_val_t php_metric_handler( int metric_index )
     Ganglia_25metric *gmi = (Ganglia_25metric *) metric_info->elts;
     mapped_info_t *mi = (mapped_info_t*) metric_mapping_info->elts;
 
+	php_request_startup(TSRMLS_C);
+
     php_verbose_debug(3, "php_metric_handler");
 
     memset(&val, 0, sizeof(val));
@@ -591,6 +605,9 @@ static g_val_t php_metric_handler( int metric_index )
     }
 
     php_verbose_debug(3, ">>> callback : %s", (char *) mi[metric_index].callback);
+
+    php_verbose_debug(2, ">>> execute php script %s", (*mi[metric_index].script).filename);
+    php_execute_script(mi[metric_index].script TSRMLS_CC);
 
     ZVAL_STRING(&funcname, mi[metric_index].callback, 1);
     MAKE_STD_ZVAL(tmp);
@@ -609,6 +626,7 @@ static g_val_t php_metric_handler( int metric_index )
     		mi[metric_index].callback, gmi[metric_index].name, mi[metric_index].mod_name);
 
     zval_ptr_dtor(&tmp);
+    php_request_shutdown(NULL);
 
     switch (gmi[metric_index].type) {
         case GANGLIA_VALUE_STRING:
