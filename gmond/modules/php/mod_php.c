@@ -75,7 +75,7 @@ typedef struct
     zval *phpmod;     /* The php metric module object */
     char *callback;   /* The metric call back function */
     char *mod_name;   /* The name */
-    zend_file_handle *script; /* PHP script to run */
+    char *script; 	  /* PHP script filename to run */
 }
 mapped_info_t;
 
@@ -99,8 +99,6 @@ static apr_pool_t *pool;
 static apr_array_header_t *metric_info = NULL;
 static apr_array_header_t *metric_mapping_info = NULL;
 static apr_status_t php_metric_cleanup ( void *data);
-
-static zval *sapi_type, **server;
 
 char modname_bfr[PATH_MAX];
 static char* is_php_module(const char* fname)
@@ -372,6 +370,19 @@ static zval* build_params_dict(cfg_t *phpmodule)
     return params_dict;
 }
 
+static void php_set_sapi_env()
+{
+	zval *sapi_type, **server;
+
+	/* Fetch $_SERVER from the global scope */
+	zend_hash_find(&EG(symbol_table), "_SERVER", sizeof("_SERVER"), (void**) &server);
+
+	/* $_SERVER['SAPI_TYPE'] = 'embed' */
+	ALLOC_INIT_ZVAL(sapi_type);
+	ZVAL_STRING(sapi_type, "embed", 1);
+	ZEND_SET_SYMBOL(Z_ARRVAL_PP(server), "SAPI_TYPE", sapi_type);
+}
+
 static int php_metric_init (apr_pool_t *p)
 {
 	DIR *dp;
@@ -431,13 +442,7 @@ static int php_metric_init (apr_pool_t *p)
 	php_embed_init(0, NULL PTSRMLS_CC);
 	php_verbose_debug(3, "php_embed_init");
 
-	/* Fetch $_SERVER from the global scope */
-	zend_hash_find(&EG(symbol_table), "_SERVER", sizeof("_SERVER"), (void**) &server);
-
-	/* $_SERVER['SAPI_TYPE'] = 'embed' */
-	ALLOC_INIT_ZVAL(sapi_type);
-	ZVAL_STRING(sapi_type, "embed", 1);
-	ZEND_SET_SYMBOL(Z_ARRVAL_PP(server), "SAPI_TYPE", sapi_type);
+	php_set_sapi_env();
 
     i = 0;
 
@@ -461,7 +466,6 @@ static int php_metric_init (apr_pool_t *p)
 
         script.type = ZEND_HANDLE_FP;
         script.filename = pestrndup((char *)&file, sizeof(file), 1);
-        //efree(&file);
         script.opened_path = NULL;
         script.free_filename = 0;
         if (!(script.handle.fp = fopen(script.filename, "rb"))) {
@@ -515,8 +519,7 @@ static int php_metric_init (apr_pool_t *p)
                     fill_gmi(gmi, &minfo);
                     mi = (mapped_info_t*)apr_array_push(metric_mapping_info);
                     mi->phpmod = *current;
-                    //pemalloc(sizeof(&script), 1);
-                    mi->script = &script;
+                    mi->script = script.filename;
                     mi->mod_name = apr_pstrdup(pool, modname);
                     mi->callback = minfo.callback;
             	}
@@ -564,7 +567,7 @@ static apr_status_t php_metric_cleanup ( void *data)
         if (mi[i].phpmod) {
         	efree(mi[i].callback);
         	zval_ptr_dtor(&mi[i].phpmod);
-        	zend_file_handle_dtor(mi[i].script);
+        	pefree(mi[i].script, 1);
 
             /* Set all modules that fall after this once with the same
              * module pointer to NULL so metric_cleanup only gets called
@@ -581,15 +584,13 @@ static apr_status_t php_metric_cleanup ( void *data)
 
 	php_embed_shutdown(TSRMLS_C);
 
-	zval_ptr_dtor(&sapi_type);
-	zval_dtor(*server);
-
     return APR_SUCCESS;
 }
 
 static g_val_t php_metric_handler( int metric_index )
 {
 	zval retval, funcname, *tmp, **zval_vector[1];
+	zend_file_handle script;
     g_val_t val;
     Ganglia_25metric *gmi = (Ganglia_25metric *) metric_info->elts;
     mapped_info_t *mi = (mapped_info_t*) metric_mapping_info->elts;
@@ -597,6 +598,8 @@ static g_val_t php_metric_handler( int metric_index )
 	php_request_startup(TSRMLS_C);
 
     php_verbose_debug(3, "php_metric_handler");
+
+	php_set_sapi_env();
 
     memset(&val, 0, sizeof(val));
     if (!mi[metric_index].callback) {
@@ -606,10 +609,20 @@ static g_val_t php_metric_handler( int metric_index )
 
     php_verbose_debug(3, ">>> callback : %s", (char *) mi[metric_index].callback);
 
-    php_verbose_debug(2, ">>> execute php script %s", (*mi[metric_index].script).filename);
-    php_execute_script(mi[metric_index].script TSRMLS_CC);
+    script.type = ZEND_HANDLE_FP;
+    script.filename = mi[metric_index].script;
+    script.opened_path = NULL;
+    script.free_filename = 0;
+    if (!(script.handle.fp = fopen(script.filename, "rb"))) {
+    	err_msg("Unable to open %s\n", script.filename);
+    	return val;
+    }
 
-    ZVAL_STRING(&funcname, mi[metric_index].callback, 1);
+    php_verbose_debug(2, ">>> execute php script %s", script.filename);
+
+    php_execute_script(&script TSRMLS_CC);
+
+    ZVAL_STRING(&funcname, mi[metric_index].callback, 0);
     MAKE_STD_ZVAL(tmp);
     ZVAL_STRING(tmp, gmi[metric_index].name, 1);
     zval_vector[0] = &tmp;
@@ -624,9 +637,6 @@ static g_val_t php_metric_handler( int metric_index )
     }
     php_verbose_debug(3, "Called the metric handler function [%s] for [%s] in the php module [%s].\n",
     		mi[metric_index].callback, gmi[metric_index].name, mi[metric_index].mod_name);
-
-    zval_ptr_dtor(&tmp);
-    php_request_shutdown(NULL);
 
     switch (gmi[metric_index].type) {
         case GANGLIA_VALUE_STRING:
@@ -666,10 +676,13 @@ static g_val_t php_metric_handler( int metric_index )
         }
         default:
         {
-            memset(&val, 0, sizeof(val));
-            break;
+        	break;
         }
     }
+
+    zval_ptr_dtor(&tmp);
+
+    php_request_shutdown(NULL);
 
     return val;
 }
