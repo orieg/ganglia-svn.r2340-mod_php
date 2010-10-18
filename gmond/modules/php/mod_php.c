@@ -64,6 +64,8 @@
 	} \
 }
 
+static zval *sapi_type, **server;
+
 /*
  * Declare ourselves so the configuration routines can find and know us.
  * We'll fill it in at the end of the module.
@@ -344,13 +346,11 @@ static cfg_t* find_module_config(char *modname)
     return NULL;
 }
 
-static zval* build_params_dict(cfg_t *phpmodule)
+static void build_params_dict(zval *params_dict, cfg_t *phpmodule)
 {
     int k;
-    zval *params_dict;
 
-    /* Create params_dict as a ZVAL ARRAY */
-    MAKE_STD_ZVAL(params_dict);
+    /* init params_dict as a ZVAL ARRAY */
     array_init(params_dict);
 
     if (phpmodule) {
@@ -366,14 +366,10 @@ static zval* build_params_dict(cfg_t *phpmodule)
             }
         }
     }
-
-    return params_dict;
 }
 
 static void php_set_sapi_env()
 {
-	zval *sapi_type, **server;
-
 	/* Fetch $_SERVER from the global scope */
 	zend_hash_find(&EG(symbol_table), "_SERVER", sizeof("_SERVER"), (void**) &server);
 
@@ -387,7 +383,7 @@ static int php_metric_init (apr_pool_t *p)
 {
 	DIR *dp;
 	struct dirent *entry;
-	int i;
+	int i = 0;
 	char* modname;
 	php_metric_init_t minfo;
 	Ganglia_25metric *gmi;
@@ -442,11 +438,18 @@ static int php_metric_init (apr_pool_t *p)
 	php_embed_init(0, NULL PTSRMLS_CC);
 	php_verbose_debug(3, "php_embed_init");
 
-	php_set_sapi_env();
-
-    i = 0;
+    zend_try {
+    	php_request_shutdown(NULL);
+    } zend_end_try();
 
     while ((entry = readdir(dp)) != NULL) {
+
+        zend_try {
+        	php_request_startup(TSRMLS_C);
+        } zend_end_try();
+
+    	php_set_sapi_env();
+
         modname = is_php_module(entry->d_name);
 
         if (modname == NULL)
@@ -477,7 +480,8 @@ static int php_metric_init (apr_pool_t *p)
         php_execute_script(&script TSRMLS_CC);
 
         /* Build a parameter dictionary to pass to the module */
-        params = build_params_dict(module_cfg);
+        MAKE_STD_ZVAL(params);
+        build_params_dict(params, module_cfg);
         if (!params || Z_TYPE_P(params) != IS_ARRAY) {
             /* No metric_init function. */
             err_msg("[PHP] Can't build the parameters array for [%s].\n", modname);
@@ -529,6 +533,7 @@ static int php_metric_init (apr_pool_t *p)
         }
 
         zval_dtor(&retval);
+    	zval_ptr_dtor(&sapi_type);
         zval_ptr_dtor(&params);
 
         zend_try {
@@ -607,7 +612,7 @@ static g_val_t php_metric_handler( int metric_index )
         return val;
     }
 
-    php_verbose_debug(3, ">>> callback : %s", (char *) mi[metric_index].callback);
+    php_verbose_debug(3, ">>> metric index : %d, callback : %s", metric_index, (char *) mi[metric_index].callback);
 
     script.type = ZEND_HANDLE_FP;
     script.filename = mi[metric_index].script;
@@ -681,6 +686,7 @@ static g_val_t php_metric_handler( int metric_index )
     }
 
     zval_ptr_dtor(&tmp);
+	zval_ptr_dtor(&sapi_type);
 
     php_request_shutdown(NULL);
 
