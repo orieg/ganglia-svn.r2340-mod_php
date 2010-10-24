@@ -374,7 +374,9 @@ static int php_metric_init (apr_pool_t *p)
 	php_metric_init_t minfo;
 	Ganglia_25metric *gmi;
 	mapped_info_t *mi;
-	const char* path = php_module.module_params;
+	const apr_array_header_t *php_module_params = php_module.module_params_list;
+	char* path = NULL;
+	char* php_ini_path = NULL;
 	cfg_t *module_cfg;
     char *key;
     uint keylen;
@@ -384,10 +386,27 @@ static int php_metric_init (apr_pool_t *p)
 	zend_uint params_length;
 	zend_file_handle script;
     char file[256];
-    int php_initialized = 0;
+    int i, php_initialized = 0;
 
 	php_verbose_debug(3, "php_metric_init");
-	php_verbose_debug(2, "php_modules path: %s", path);
+	php_verbose_debug(3, "php_module_params size : %d", php_module_params->nelts);
+
+	for (i=0; i < php_module_params->nelts; ++i) {
+
+		mmparam node = ((mmparam *)php_module_params->elts)[i];
+
+		php_verbose_debug(3, "php_module_params: Key=%s, Value=%s", node.name, node.value);
+
+		if (!strcasecmp(node.name, "php_modules_path")) {
+			path = node.value;
+			php_verbose_debug(2, "php_modules path: %s", path);
+		} else if (!strcasecmp(node.name, "php_ini_path")) {
+			php_ini_path = node.value;
+		} else {
+			php_verbose_debug(1, "Unknown PHP module param : %s", node.name);
+		}
+
+	}
 
 	/* Allocate a pool that will be used by this module */
 	apr_pool_create(&pool, p);
@@ -423,6 +442,15 @@ static int php_metric_init (apr_pool_t *p)
     }
 
 	php_verbose_debug(3, "php_embed_init");
+	if (php_ini_path) {
+		if (access(php_ini_path, R_OK)) {
+	        err_msg("[PHP] Can't read the php.ini : %s.\n", php_ini_path);
+	        return -1;
+		} else {
+			php_verbose_debug(2, "Using php.ini : %s", php_ini_path);
+			php_embed_module.php_ini_path_override = php_ini_path;
+		}
+	}
 	if (php_embed_init(0, NULL PTSRMLS_CC) != SUCCESS) {
 		err_msg("[PHP] Can't start the PHP engine.");
 		return -1;

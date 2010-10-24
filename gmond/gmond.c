@@ -1903,7 +1903,7 @@ load_metric_modules( void )
         modparams = cfg_getstr(module, "params");
         modParams_list = apr_array_make(global_context, 2, sizeof(mmparam));
 
-        for (k = 0; k < cfg_size(module, "param"); k++) 
+        for (k = 0; k < cfg_size(module, "param"); k++)
           {
             cfg_t *param;
             mmparam *node = apr_array_push(modParams_list);
