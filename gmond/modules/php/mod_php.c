@@ -384,6 +384,7 @@ static int php_metric_init (apr_pool_t *p)
 	zend_uint params_length;
 	zend_file_handle script;
     char file[256];
+    int php_initialized = 0;
 
 	php_verbose_debug(3, "php_metric_init");
 	php_verbose_debug(2, "php_modules path: %s", path);
@@ -430,10 +431,6 @@ static int php_metric_init (apr_pool_t *p)
 
     while ((entry = readdir(dp)) != NULL) {
 
-        zend_try {
-        	php_request_startup(TSRMLS_C);
-        } zend_end_try();
-
         modname = is_php_module(entry->d_name);
 
         if (modname == NULL)
@@ -445,6 +442,15 @@ static int php_metric_init (apr_pool_t *p)
         module_cfg = find_module_config(modname);
         if (!module_cfg)
             continue;
+
+        /* start php engine if not started yet */
+        zend_try {
+        	if (!php_initialized) {
+        		php_initialized = 1;
+        	} else {
+        		php_request_startup(TSRMLS_C);
+        	}
+        } zend_end_try();
 
         strcpy(file, path);
         strcat(file, "/");
