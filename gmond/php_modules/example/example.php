@@ -107,7 +107,7 @@ function metric_cleanup() {
 }
 
 #This code is for debugging and unit testing
-if ($_SERVER['SAPI_TYPE'] != 'embed') {
+if (php_sapi_name() != 'embed') {
 	print "Non-embed mode\n";
     $params = array(
         'RandomMax' => '500',

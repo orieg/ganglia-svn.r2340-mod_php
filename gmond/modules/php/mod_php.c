@@ -64,8 +64,6 @@
 	} \
 }
 
-static zval *sapi_type, **server;
-
 /*
  * Declare ourselves so the configuration routines can find and know us.
  * We'll fill it in at the end of the module.
@@ -368,22 +366,10 @@ static void build_params_dict(zval *params_dict, cfg_t *phpmodule)
     }
 }
 
-static void php_set_sapi_env()
-{
-	/* Fetch $_SERVER from the global scope */
-	zend_hash_find(&EG(symbol_table), "_SERVER", sizeof("_SERVER"), (void**) &server);
-
-	/* $_SERVER['SAPI_TYPE'] = 'embed' */
-	ALLOC_INIT_ZVAL(sapi_type);
-	ZVAL_STRING(sapi_type, "embed", 1);
-	ZEND_SET_SYMBOL(Z_ARRVAL_PP(server), "SAPI_TYPE", sapi_type);
-}
-
 static int php_metric_init (apr_pool_t *p)
 {
 	DIR *dp;
 	struct dirent *entry;
-	int i = 0;
 	char* modname;
 	php_metric_init_t minfo;
 	Ganglia_25metric *gmi;
@@ -435,20 +421,18 @@ static int php_metric_init (apr_pool_t *p)
         return -1;
     }
 
-	php_embed_init(0, NULL PTSRMLS_CC);
 	php_verbose_debug(3, "php_embed_init");
-
-    zend_try {
-    	php_request_shutdown(NULL);
-    } zend_end_try();
+	if (php_embed_init(0, NULL PTSRMLS_CC) != SUCCESS) {
+		err_msg("[PHP] Can't start the PHP engine.");
+		return -1;
+	}
+    php_verbose_debug(2, ">>> started php sapi %s", sapi_module.name);
 
     while ((entry = readdir(dp)) != NULL) {
 
         zend_try {
         	php_request_startup(TSRMLS_C);
         } zend_end_try();
-
-    	php_set_sapi_env();
 
         modname = is_php_module(entry->d_name);
 
@@ -533,7 +517,6 @@ static int php_metric_init (apr_pool_t *p)
         }
 
         zval_dtor(&retval);
-    	zval_ptr_dtor(&sapi_type);
         zval_ptr_dtor(&params);
 
         zend_try {
@@ -570,9 +553,9 @@ static apr_status_t php_metric_cleanup ( void *data)
     mi = (mapped_info_t*) metric_mapping_info->elts;
     for (i = 0; i < metric_mapping_info->nelts; i++) {
         if (mi[i].phpmod) {
-        	efree(mi[i].callback);
+        	//efree(mi[i].callback);
+        	//pefree(mi[i].script, 1);
         	zval_ptr_dtor(&mi[i].phpmod);
-        	pefree(mi[i].script, 1);
 
             /* Set all modules that fall after this once with the same
              * module pointer to NULL so metric_cleanup only gets called
@@ -587,7 +570,15 @@ static apr_status_t php_metric_cleanup ( void *data)
         }
     }
 
-	php_embed_shutdown(TSRMLS_C);
+    php_module_shutdown(TSRMLS_C);
+    sapi_shutdown();
+#ifdef ZTS
+    tsrm_shutdown();
+#endif
+    if (php_embed_module.ini_entries) {
+        free(php_embed_module.ini_entries);
+        php_embed_module.ini_entries = NULL;
+    }
 
     return APR_SUCCESS;
 }
@@ -603,8 +594,6 @@ static g_val_t php_metric_handler( int metric_index )
 	php_request_startup(TSRMLS_C);
 
     php_verbose_debug(3, "php_metric_handler");
-
-	php_set_sapi_env();
 
     memset(&val, 0, sizeof(val));
     if (!mi[metric_index].callback) {
@@ -686,7 +675,6 @@ static g_val_t php_metric_handler( int metric_index )
     }
 
     zval_ptr_dtor(&tmp);
-	zval_ptr_dtor(&sapi_type);
 
     php_request_shutdown(NULL);
 
